@@ -1,0 +1,97 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation Template for creating an EC2 Launch Template
+
+Parameters: # manual editions to our template on upload
+  EnvironmentName: # Used to align with VPC naming
+    Description: An environment name that is prefixed to resource names
+    Type: String
+  InstanceType:
+    Description: WebServer EC2 Type
+    Type: String
+    Default: t3.small
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - t2.large
+      - t3.micro
+      - t3.small
+      - t3.medium
+    ConstraintDescription: Must be a valid Instance Type
+  KeyPairName:
+    Description: Name of an existing KeyPair for SSH
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: Must be a valid KeyPair for EC2
+
+Mappings:
+  AMIMapping: # Define AMI Mappings here. CHECK CURRENT AMIs
+    us-east-1:
+      AMI: ami-084a7d336e816906b
+    # us-east-2:
+    #   AMI: ami-0900fe555666598a2
+    # us-west-1:
+    #   AMI: ami-0b990d3cfca306617
+    # us-west-2:
+    #   AMI: ami-0395649fve870727e
+
+Resources:
+  MyLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName:
+        Fn::Sub: ${EnvironmentName}_launchtemplate
+      LaunchTemplateData:
+        ImageId: !FindInMap [ AMIMapping, !Ref 'AWS::Region', 'AMI' ] 
+        InstanceType: !Ref InstanceType 
+        KeyName: !Ref KeyPairName
+        IamInstanceProfile:
+          Arn: 'arn:aws:iam::318228906383:instance-profile/EC2ReadFromS3'
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub '${EnvironmentName}-web'
+              - Key: BatchID
+                Value: '07282025'
+        # SecurityGroupIds:
+        #   - sg-00f11a3e2b8af7b3b
+        NetworkInterfaces:
+          - AssociatePublicIpAddress: true 
+            DeviceIndex: 0
+            Groups: 
+              - sg-0c4679f8341d3f3ae
+        UserData: # Base64-encoded
+          Fn::Base64: 
+            !Sub |
+               #!/bin/bash
+
+               sudo dnf update -y
+               sudo dnf install -y httpd php php-mysqlnd php-fpm php-json php-gd php-xml php-mbstring
+               sudo dnf install stress-ng -y
+
+               # database dependencies for WP
+               sudo wget https://dev.mysql.com/get/mysql80-community-release-el9-1.noarch.rpm
+
+               sudo dnf install mysql80-community-release-el9-1.noarch.rpm -y
+
+               sudo rpm --import https://repo.mysql.com/RPM-GPG-KEY-mysql-2023
+
+               sudo dnf install mysql-community-client -y
+               sudo dnf install mysql-community-server -y
+
+               sudo systemctl start mysqld
+               sudo systemctl enable mysqld
+
+               # web server boot up
+               sudo systemctl enable httpd
+               sudo systemctl start httpd 
+
+Outputs:
+  LaunchTemplateID:
+    Value: !Ref MyLaunchTemplate
+    Export:
+      Name: ec2-LaunchTemplateID # to be included in ASG
+  LaunchTemplateLatestVersion:
+    Value: !GetAtt MyLaunchTemplate.LatestVersionNumber
+    Export:
+      Name: ec2-LaunchTemplateLatestVersion
